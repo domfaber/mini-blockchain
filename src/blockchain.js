@@ -34,6 +34,7 @@ class Blockchain {
      * Passing as a data `{data: 'Genesis Block'}`
      */
     async initializeChain() {
+        console.log('init');
         if( this.height === -1){
             let block = new BlockClass.Block({data: 'Genesis Block'});
             await this._addBlock(block);
@@ -64,25 +65,32 @@ class Blockchain {
     _addBlock(block) {
         let self = this;
         return new Promise(async (resolve, reject) => {
-            try {
+                console.log('add block');
                 //Get previous block
-                let previousBlock = self.getBlockByHeight(self.height);
+                //console.log('previousBlock:'+previousBlock);
                 //Modify the block
-                block.previousBlockHash=previousBlock.hash;
-                block.time = now();
+                
+                block.time = new Date();
                 block.height = self.height+1;
+
+                let previousBlock = -1;
+                if (self.height>-1) previousBlock = await self.getBlockByHeight(self.height);
+
                 //create hash of the block
                 let hash = SHA256(JSON.stringify(block));
+
                 //assign the hash to the block
-                block.hash=hash;
+                block.hash=""+hash;
+                block.previousBlockHash=previousBlock.hash;
                 //Push the block
                 self.chain.push(block);
+                this.height++;
                 resolve(block);
-            } catch (err) {
-                reject({err: err});
-            }
+                reject({error:"block could not be added"});
+
         });
     }
+    
 
     /**
      * The requestMessageOwnershipVerification(address) method
@@ -94,7 +102,7 @@ class Blockchain {
      */
     requestMessageOwnershipVerification(address) {
         return new Promise((resolve) => {
-            
+            resolve(`${address}:${new Date().getTime().toString().slice(0,-3)}:starRegistry`)
         });
     }
 
@@ -116,12 +124,27 @@ class Blockchain {
      * @param {*} star 
      */
     submitStar(address, message, signature, star) {
+        console.log("submit star");
         let self = this;
         return new Promise(async (resolve, reject) => {
+            let messageTime = parseInt(message.split(':')[1]);
+            let currentTime = parseInt(new Date().getTime().toString().slice(0, -3));
             
+            if (currentTime-messageTime <= 300000) { //change back to 300 - just for testing
+            
+                if (bitcoinMessage.verify(message, address, signature)) {
+            
+                    let newBlock = new BlockClass.Block({star:star, owner:address});
+                    let newBlockAdded = await this._addBlock(newBlock);
+                    resolve(newBlockAdded);
+                }
+            } else {
+            
+                reject({error:"too late"});
+            }
         });
     }
-
+    
     /**
      * This method will return a Promise that will resolve with the Block
      *  with the hash passed as a parameter.
@@ -131,7 +154,12 @@ class Blockchain {
     getBlockByHash(hash) {
         let self = this;
         return new Promise((resolve, reject) => {
-           
+            let foundBlock = self.chain.filter((block) => block.hash === hash)[0];
+            if (foundBlock) {
+                resolve(block);
+            } else {
+                resolve(null);
+           }
         });
     }
 
@@ -142,12 +170,16 @@ class Blockchain {
      */
     getBlockByHeight(height) {
         let self = this;
+        
         return new Promise((resolve, reject) => {
-            let block = self.chain.filter(p => p.height === height)[0];
+            let block = self.chain[height];
             if(block){
+        
                 resolve(block);
             } else {
-                resolve(null);
+                reject({error:'no block available'});
+        
+
             }
         });
     }
@@ -159,10 +191,26 @@ class Blockchain {
      * @param {*} address 
      */
     getStarsByWalletAddress (address) {
+        console.log('get stars by address')
         let self = this;
         let stars = [];
         return new Promise((resolve, reject) => {
             
+            let validChain = self.validateChain();
+            if (!validChain) reject({error: 'ups the chain is tampered'});
+            let blocks = self.chain.filter(async (block)=> await block.getBData().owner === address);
+            
+            if (blocks.length>0) {
+            
+                blocks.forEach(async(block) => {
+                    let data= await block.getBData();
+                    if (data.owner === address) stars.push(data);
+                });
+            
+                resolve(stars);
+            } else {
+                resolve(null);
+            }
         });
     }
 
@@ -173,13 +221,34 @@ class Blockchain {
      * 2. Each Block should check the with the previousBlockHash
      */
     validateChain() {
+        console.log('validate chain')
         let self = this;
         let errorLog = [];
         return new Promise(async (resolve, reject) => {
-            
+            let i=0;
+            try {
+                self.chain.forEach(async(block) => {
+                    
+                    
+                    let blocklvalid = block.validate();
+                    if (!blocklvalid) {
+                        errorLog.push({error: "block validation failed"});
+                    }
+                    if (i>0) console.log(block.previousBlockHash + "===" + self.chain[block.height-1].hash)
+                    if (i>0 && self.chain[block.height-1].hash!=block.previousBlockHash) {
+                        errorLog.push({error:"Chain is broken"})
+                    }
+                    i++;
+                });
+
+            if (errorLog.length>0) reject(errorLog) 
+            else resolve({message:"chain is valid"})
+            } catch(err) {
+                reject({error:err})
+            }
         });
     }
 
 }
 
-module.exports.Blockchain = Blockchain;   
+module.exports.Blockchain = Blockchain; 
