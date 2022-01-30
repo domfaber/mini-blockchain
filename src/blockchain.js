@@ -83,11 +83,15 @@ class Blockchain {
                 block.hash=""+hash;
                 block.previousBlockHash=previousBlock.hash;
                 //Push the block
-                self.chain.push(block);
-                this.height++;
-                resolve(block);
-                reject({error:"block could not be added"});
-
+                //Validate chain
+                let isValidChain = await self.validateChain();
+                if (isValidChain) {
+                    self.chain.push(block);
+                    this.height++;
+                    resolve(block);
+                } else {
+                    reject({error:"Chain is invalid. Block was not added"});
+                }
         });
     }
     
@@ -130,7 +134,7 @@ class Blockchain {
             let messageTime = parseInt(message.split(':')[1]);
             let currentTime = parseInt(new Date().getTime().toString().slice(0, -3));
             
-            if (currentTime-messageTime <= 300000) { //change back to 300 - just for testing
+            if (currentTime-messageTime <= 300) { 
             
                 if (bitcoinMessage.verify(message, address, signature)) {
             
@@ -154,7 +158,7 @@ class Blockchain {
     getBlockByHash(hash) {
         let self = this;
         return new Promise((resolve, reject) => {
-            let foundBlock = self.chain.filter((block) => block.hash === hash)[0];
+            let foundBlock = self.chain.find((block) => block.hash === hash);
             if (foundBlock) {
                 resolve(block);
             } else {
@@ -227,10 +231,8 @@ class Blockchain {
         return new Promise(async (resolve, reject) => {
             let i=0;
             try {
-                self.chain.forEach(async(block) => {
-                    
-                    
-                    let blocklvalid = block.validate();
+                for (const block of self.chain) {
+                    let blocklvalid = await block.validate();
                     if (!blocklvalid) {
                         errorLog.push({error: "block validation failed"});
                     }
@@ -239,7 +241,7 @@ class Blockchain {
                         errorLog.push({error:"Chain is broken"})
                     }
                     i++;
-                });
+                };
 
             if (errorLog.length>0) reject(errorLog) 
             else resolve({message:"chain is valid"})
